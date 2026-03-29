@@ -1,0 +1,148 @@
+#include <Servo.h>
+
+#define BUTTON_PIN 2
+#define GREEN_LED 4
+#define RED_LED 5
+#define BUZZER 6
+#define SERVO_PIN 9
+
+Servo lockServo;
+
+const int PATTERN_LENGTH = 3;
+unsigned long learnedPattern[PATTERN_LENGTH];
+unsigned long inputPattern[PATTERN_LENGTH];
+
+int wrongAttempts = 0;
+bool fullyLocked = false;
+
+
+bool trained = false;
+
+void setup() {
+  pinMode(BUTTON_PIN, INPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
+
+  lockServo.attach(SERVO_PIN);
+  lockServo.write(0); // Locked
+
+  Serial.begin(9600);
+  Serial.println("Adaptive Tap Lock Ready");
+}
+
+void loop() {
+  
+  if (fullyLocked) {
+  digitalWrite(RED_LED, HIGH);  
+  return;                        // ignore everything
+}
+
+  if (buttonHeld(5000)) {
+    trainPattern();
+  }
+
+  if (trained) {
+    readPattern(inputPattern);
+    if (matchPattern()) {
+      unlock();
+    } else {
+      deny();
+    }
+    delay(2000);
+  }
+}
+
+// ---------------- FUNCTIONS ----------------
+
+bool buttonHeld(unsigned long timeMs) {
+  if (digitalRead(BUTTON_PIN)) {
+    unsigned long start = millis();
+    while (digitalRead(BUTTON_PIN)) {
+      if (millis() - start >= timeMs) return true;
+    }
+  }
+  return false;
+}
+
+void trainPattern() {
+ for (int i = 0; i < PATTERN_LENGTH; i++) {
+  learnedPattern[i] = 0;
+}
+
+  Serial.println("Training Mode");
+  tone(BUZZER, 800, 200);
+  delay(1000);
+
+  unsigned long temp[PATTERN_LENGTH];
+
+  for (int i = 0; i < 3; i++) {
+    readPattern(temp);
+    for (int j = 0; j < PATTERN_LENGTH; j++) {
+      learnedPattern[j] += temp[j];
+    }
+  }
+
+  for (int j = 0; j < PATTERN_LENGTH; j++) {
+    learnedPattern[j] /= 3;
+  }
+
+  trained = true;
+  digitalWrite(GREEN_LED, HIGH);
+  delay(1000);
+  digitalWrite(GREEN_LED, LOW);
+
+  Serial.println("Pattern Learned");
+}
+
+void readPattern(unsigned long pattern[]) {
+  unsigned long lastTap = 0;
+
+  for (int i = 0; i < PATTERN_LENGTH; i++) {
+    while (!digitalRead(BUTTON_PIN));
+    unsigned long now = millis();
+    while (digitalRead(BUTTON_PIN));
+
+    if (i > 0) pattern[i - 1] = now - lastTap;
+    lastTap = now;
+    delay(200);
+  }
+}
+
+bool matchPattern() {
+  for (int i = 0; i < PATTERN_LENGTH - 1; i++) {
+    if (abs((long)inputPattern[i] - (long)learnedPattern[i]) > 150) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void unlock() {
+  Serial.println("ACCESS GRANTED");
+  wrongAttempts = 0;
+
+  digitalWrite(GREEN_LED, HIGH);
+  tone(BUZZER, 1000, 200);
+  lockServo.write(90);
+  delay(10000);
+  lockServo.write(0);
+  digitalWrite(GREEN_LED, LOW);
+}
+
+void deny() {
+  Serial.println("ACCESS DENIED");
+  
+  digitalWrite(RED_LED, HIGH);
+  tone(BUZZER, 300, 500);
+  delay(3000);
+  digitalWrite(RED_LED, LOW);
+  wrongAttempts++;
+
+if (wrongAttempts >= 3) {
+  fullyLocked = true;
+  Serial.println("SYSTEM FULLY LOCKED");
+  digitalWrite(RED_LED, HIGH);
+}
+
+}
